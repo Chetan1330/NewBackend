@@ -863,9 +863,7 @@ class analyze(APIView):
                     # ScenarioName=request.data['SelectScenario'],
                     # SolutionName=request.data['SelectSolution'],
             
-            # if scenarioobj:
-            #     for i in scenarioobj:
-            #         print("ScenarioSolution data:", i.SolutionName)
+            
 
             from sklearn import metrics
             import numpy as np
@@ -922,12 +920,19 @@ class analyze(APIView):
                 # print("Performance Metrics:", performance_metrics)
                 return performance_metrics
 
+            
             path_testdata=os.path.join(BASE_DIR,'apis/TestValues/test.csv')
             path_traindata=os.path.join(BASE_DIR,'apis/TestValues/train.csv')
             path_module=os.path.join(BASE_DIR,'apis/TestValues/model.pkl')
             path_factsheet=os.path.join(BASE_DIR,'apis/TestValues/factsheet.json')
             # path_mapping_accountabiltiy=os.path.join(BASE_DIR,'apis/MappingsWeightsMetrics/Mappings/Accountability/default.json')
             # path_mapping_fairness=os.path.join(BASE_DIR,'apis/MappingsWeightsMetrics/Mappings/explainability/default.json')
+
+            if scenarioobj:
+                for i in scenarioobj:
+                    path_testdata=i.TestFile
+                    path_module=i.ModelFile
+                    print("ScenarioSolution data:", i.SolutionName)
             print("Performance_Metrics reslt:", get_performance_metrics(path_module,path_testdata, 'Target'))
             
         
@@ -1682,3 +1687,4 @@ def myFunc(x):
 def myFunc2(x):
     return x[-1]-x[0]
     return Response("success")
+
