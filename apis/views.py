@@ -831,6 +831,13 @@ class analyze(APIView):
         classweightedprecision=[]
         globalf1score=[]
         classweightedf1score=[]
+
+        ModelType=[]
+        TrainTestSplit=[]
+        classweightedrecall=[]
+        globalprecision=[]
+        classweightedprecision=[]
+        globalf1score=[]
         
 
         print("POST analyze request.data request:",request.data)
@@ -841,13 +848,18 @@ class analyze(APIView):
             
             if scenario:
                 for i in scenario:
-                    print("Response data ScenarioName:", i.response_data['ScenarioName']),
-                    print("Response data Description:", i.response_data['Description']),
-                    print("Response data LinktoDataset:", i.response_data['LinktoDataset'])
+                    # print("Response data ScenarioName:", i.response_data['ScenarioName']),
+                    # print("Response data SelectScenario:", request.data['SelectScenario']),
+                    # print("Response data Description:", i.response_data['Description']),
+                    # print("Response data LinktoDataset:", i.response_data['LinktoDataset'])
+                    if str(i.response_data['ScenarioName']).split("['")[1].split("']")[0] == str(request.data['SelectScenario']):
+                        print("Response data ScenarioName:", i.response_data['ScenarioName']),
+                        print("Response data Description:", i.response_data['Description']),
+                        print("Response data LinktoDataset:", i.response_data['LinktoDataset'])
 
-                    ScenarioName.append(str(i.response_data['ScenarioName']).split("['")[1].split("']")[0]),
-                    LinktoDataset.append(str(i.response_data['LinktoDataset']).split("['")[1].split("']")[0]),
-                    Description.append(str(i.response_data['Description']).split("['")[1].split("']")[0]),
+                        ScenarioName.append(str(i.response_data['ScenarioName']).split("['")[1].split("']")[0]),
+                        LinktoDataset.append(str(i.response_data['LinktoDataset']).split("['")[1].split("']")[0]),
+                        Description.append(str(i.response_data['Description']).split("['")[1].split("']")[0]),
                     
                     # ScenarioName= i.response_data['ScenarioName'],
                     # LinktoDataset= i.response_data['LinktoDataset'],
@@ -864,6 +876,207 @@ class analyze(APIView):
                     # SolutionName=request.data['SelectSolution'],
             
             
+
+            from sklearn import metrics
+            import numpy as np
+            import tensorflow as tf
+
+            DEFAULT_TARGET_COLUMN_INDEX = -1
+            DEFAULT_TARGET_COLUMN_NAME = 'Target'
+            import pandas as pd
+
+            def get_performance_metrics(model, test_data, target_column, train_data, factsheet):
+                model=pd.read_pickle(model)
+                test_data=pd.read_csv(test_data)
+
+                train_data=pd.read_csv(train_data)
+                
+                factsheet=os.path.join(BASE_DIR,'media/' + str(factsheet))
+                with open(factsheet, 'r') as g:
+                    factsheet = json.loads(g.read())
+
+                y_test = test_data[target_column]
+                y_true = y_test.values.flatten()
+
+                if target_column:
+                    X_test = test_data.drop(target_column, axis=1)
+                    y_test = test_data[target_column]
+                else:
+                    X_test = test_data.iloc[:,:DEFAULT_TARGET_COLUMN_INDEX]
+                    y_test = test_data.reset_index(drop=True).iloc[:,DEFAULT_TARGET_COLUMN_INDEX:]
+                    y_true = y_test.values.flatten()
+                if (isinstance(model, tf.keras.Sequential)):
+                    y_pred_proba = model.predict(X_test)
+                    y_pred = np.argmax(y_pred_proba, axis=1)
+                else:
+                    y_pred = model.predict(X_test).flatten()
+                    labels = np.unique(np.array([y_pred,y_true]).flatten())
+
+                performance_metrics = pd.DataFrame({
+                "accuracy" : [metrics.accuracy_score(y_true, y_pred)],
+                "global recall" : [metrics.recall_score(y_true, y_pred, labels=labels, average="micro")],
+                "class weighted recall" : [metrics.recall_score(y_true, y_pred,average="weighted")],
+                "global precision" : [metrics.precision_score(y_true, y_pred, labels=labels, average="micro")],
+                "class weighted precision" : [metrics.precision_score(y_true, y_pred,average="weighted")],
+                "global f1 score" : [metrics.f1_score(y_true, y_pred,average="micro")],
+                "class weighted f1 score" : [metrics.f1_score(y_true, y_pred,average="weighted")],
+                }).round(decimals=2)
+
+                uploaddic['accuracy'] = ("%.2f" % metrics.accuracy_score(y_true, y_pred))
+                uploaddic['globalrecall'] = ("%.2f" % metrics.recall_score(y_true, y_pred, labels=labels, average="micro"))
+                uploaddic['classweightedrecall'] = ("%.2f" % metrics.recall_score(y_true, y_pred,average="weighted"))
+                uploaddic['globalprecision'] = ("%.2f" % metrics.precision_score(y_true, y_pred, labels=labels, average="micro"))
+                uploaddic['classweightedprecision'] = ("%.2f" % metrics.precision_score(y_true, y_pred,average="weighted"))
+                uploaddic['globalf1score'] = ("%.2f" % metrics.f1_score(y_true, y_pred,average="micro"))
+                uploaddic['classweightedf1score'] = ("%.2f" % metrics.f1_score(y_true, y_pred,average="weighted"))
+
+
+                if "properties" in factsheet:
+                    factsheet = factsheet["properties"]
+
+                    properties = pd.DataFrame({
+                        "Model Type": [factsheet["explainability"]["algorithm_class"]["clf_name"][1]],
+                        "Train Test Split": [factsheet["methodology"]["train_test_split"]["train_test_split"][1]],
+                        "Train / Test Data Size": str(train_data.shape[0])+ " samples / "+ str(test_data.shape[0])+ " samples",
+                        "Regularization Technique": [factsheet["methodology"]["regularization"]["regularization_technique"][1]],
+                        "Normalization Technique": [factsheet["methodology"]["normalization"]["normalization"][1]],
+                        "Number of Features": [factsheet["explainability"]["model_size"]["n_features"][1]],
+                    })
+                    uploaddic['ModelType'] = factsheet["explainability"]["algorithm_class"]["clf_name"][1]
+                    uploaddic['TrainTestSplit'] = factsheet["methodology"]["train_test_split"]["train_test_split"][1]
+                    uploaddic['DataSize'] = str(train_data.shape[0])+ " samples / "+ str(test_data.shape[0])+ " samples"
+                    uploaddic['RegularizationTechnique'] = factsheet["methodology"]["regularization"]["regularization_technique"][1]
+                    uploaddic['NormalizationTechnique'] = factsheet["methodology"]["normalization"]["normalization"][1]
+                    uploaddic['NumberofFeatures'] = factsheet["explainability"]["model_size"]["n_features"][1]
+                    # print("Model type:", factsheet["explainability"]["algorithm_class"]["clf_name"][1])
+                    properties = properties.transpose()
+                    properties = properties.reset_index()
+                    properties['index'] = properties['index'].str.title()
+                    properties.rename(columns={"index": "key", 0: "value"}, inplace=True)
+                performance_metrics = performance_metrics.transpose()
+                performance_metrics = performance_metrics.reset_index()
+                performance_metrics['index'] = performance_metrics['index'].str.title()
+                performance_metrics.rename(columns={"index":"key", 0:"value"}, inplace=True)
+
+                # print("Performance Metrics:", performance_metrics)
+                return performance_metrics
+
+            
+            path_testdata=os.path.join(BASE_DIR,'apis/TestValues/test.csv')
+            path_module=os.path.join(BASE_DIR,'apis/TestValues/model.pkl')
+            path_traindata=os.path.join(BASE_DIR,'apis/TestValues/train.csv')
+            path_factsheet=os.path.join(BASE_DIR,'apis/TestValues/factsheet.json')
+            
+            if scenarioobj:
+                for i in scenarioobj:
+                    if i.ScenarioName == request.data['SelectScenario'] and i.SolutionName == request.data['SelectSolution1']:
+                        path_testdata=i.TestFile
+                        path_module=i.ModelFile
+                        path_traindata=i.TrainingFile
+                        path_factsheet=i.FactsheetFile
+                        Target = i.Targetcolumn
+                        print("Factsheet file:", i.FactsheetFile)
+                        print("ScenarioSolution data:", i.SolutionName)
+
+            print("Performance_Metrics reslt:", get_performance_metrics(path_module,path_testdata, 'Target', path_traindata, path_factsheet))
+            
+
+            # def get_properties_section(train_data, test_data, factsheet):
+            #     import pandas as pd
+
+            #     train_data=pd.read_csv(train_data)
+            #     test_data=pd.read_csv(test_data)
+
+            #     with open(factsheet, 'r') as g:
+            #         factsheet = json.loads(g.read())
+
+                
+            #     if "properties" in factsheet:
+            #         factsheet = factsheet["properties"]
+
+            #         properties = pd.DataFrame({
+            #             "Model Type": [factsheet["explainability"]["algorithm_class"]["clf_name"][1]],
+            #             "Train Test Split": [factsheet["methodology"]["train_test_split"]["train_test_split"][1]],
+            #             "Train / Test Data Size": str(train_data.shape[0])+ " samples / "+ str(test_data.shape[0])+ " samples",
+            #             "Regularization Technique": [factsheet["methodology"]["regularization"]["regularization_technique"][1]],
+            #             "Normalization Technique": [factsheet["methodology"]["normalization"]["normalization"][1]],
+            #             "Number of Features": [factsheet["explainability"]["model_size"]["n_features"][1]],
+            #         })
+            #         properties = properties.transpose()
+            #         properties = properties.reset_index()
+            #         properties['index'] = properties['index'].str.title()
+            #         properties.rename(columns={"index": "key", 0: "value"}, inplace=True)
+            #         return properties
+
+
+            # path_testdata=os.path.join(BASE_DIR,'apis/TestValues/test.csv')
+            # path_traindata=os.path.join(BASE_DIR,'apis/TestValues/train.csv')
+            # path_module=os.path.join(BASE_DIR,'apis/TestValues/model.pkl')
+            # path_factsheet=os.path.join(BASE_DIR,'apis/TestValues/factsheet.json')
+            # # path_mapping_accountabiltiy=os.path.join(BASE_DIR,'apis/MappingsWeightsMetrics/Mappings/Accountability/default.json')
+            # # path_mapping_fairness=os.path.join(BASE_DIR,'apis/MappingsWeightsMetrics/Mappings/explainability/default.json')
+
+            # if scenarioobj:
+            #     for i in scenarioobj:
+            #         path_testdata=i.TestFile
+            #         path_traindata=i.TrainingFile
+            #         path_factsheet=i.FactsheetFile
+            #         print("ScenarioSolution data:", i.SolutionName)
+
+            # print("properties_section reslt:", get_properties_section(path_traindata,path_testdata, path_factsheet))
+        
+        # return result(score=score, properties=properties)
+        return Response(uploaddic)
+
+        # def get_factsheet_completeness_score(model, training_dataset, test_dataset, factsheet, methodology_config):
+        #     import collections
+        #     info = collections.namedtuple('info', 'description value')
+        #     result = collections.namedtuple('result', 'score properties')
+
+        #     score = 0
+        #     properties= {"dep" :info('Depends on','Factsheet')}
+        #     GENERAL_INPUTS = ["model_name", "purpose_description", "domain_description", "training_data_description", "model_information", "authors", "contact_information"]
+
+        #     n = len(GENERAL_INPUTS)
+        #     ctr = 0
+        #     for e in GENERAL_INPUTS:
+        #         if "general" in factsheet and e in factsheet["general"]:
+        #             ctr+=1
+        #             properties[e] = info("Factsheet Property {}".format(e.replace("_"," ")), "present")
+        #         else:
+        #             properties[e] = info("Factsheet Property {}".format(e.replace("_"," ")), "missing")
+        #     score = round(ctr/n*5)
+        #     # return result(score=score, properties=properties)
+        #     return Response("Successfully add!")
+
+class compare(APIView):
+    def get(self,request,id):
+        
+        print("compare get.... Created new")
+        # return Response(uploaddic)
+    
+    def post(self, request):
+        uploaddic = {}
+
+        ScenarioName=[]
+        LinktoDataset=[]
+        Description=[]
+
+        accuracy=[]
+        globalrecall=[]
+        classweightedrecall=[]
+        globalprecision=[]
+        classweightedprecision=[]
+        globalf1score=[]
+        classweightedf1score=[]
+        
+        print("POST compare request.data request:",request.data)
+
+        if request.data is not None:
+            userexist = ScenarioUser.objects.get(user_id=request.data['Userid'])
+            scenario = userexist.Scenario.all()
+            scenarioobj = userexist.scenariosolution.filter(ScenarioName=request.data['Userid'])
+            # scenarioobj = userexist.scenariosolution.all()
 
             from sklearn import metrics
             import numpy as np
@@ -920,6 +1133,54 @@ class analyze(APIView):
                 # print("Performance Metrics:", performance_metrics)
                 return performance_metrics
 
+            def get_performance_metrics2(model, test_data, target_column):
+                model=pd.read_pickle(model)
+                test_data=pd.read_csv(test_data)
+
+                y_test = test_data[target_column]
+                y_true = y_test.values.flatten()
+
+                if target_column:
+                    X_test = test_data.drop(target_column, axis=1)
+                    y_test = test_data[target_column]
+                else:
+                    X_test = test_data.iloc[:,:DEFAULT_TARGET_COLUMN_INDEX]
+                    y_test = test_data.reset_index(drop=True).iloc[:,DEFAULT_TARGET_COLUMN_INDEX:]
+                    y_true = y_test.values.flatten()
+                if (isinstance(model, tf.keras.Sequential)):
+                    y_pred_proba = model.predict(X_test)
+                    y_pred = np.argmax(y_pred_proba, axis=1)
+                else:
+                    y_pred = model.predict(X_test).flatten()
+                    labels = np.unique(np.array([y_pred,y_true]).flatten())
+
+                performance_metrics = pd.DataFrame({
+                "accuracy" : [metrics.accuracy_score(y_true, y_pred)],
+                "global recall" : [metrics.recall_score(y_true, y_pred, labels=labels, average="micro")],
+                "class weighted recall" : [metrics.recall_score(y_true, y_pred,average="weighted")],
+                "global precision" : [metrics.precision_score(y_true, y_pred, labels=labels, average="micro")],
+                "class weighted precision" : [metrics.precision_score(y_true, y_pred,average="weighted")],
+                "global f1 score" : [metrics.f1_score(y_true, y_pred,average="micro")],
+                "class weighted f1 score" : [metrics.f1_score(y_true, y_pred,average="weighted")],
+                }).round(decimals=2)
+
+                uploaddic['accuracy2'] = ("%.2f" % metrics.accuracy_score(y_true, y_pred))
+                uploaddic['globalrecall2'] = ("%.2f" % metrics.recall_score(y_true, y_pred, labels=labels, average="micro"))
+                uploaddic['classweightedrecall2'] = ("%.2f" % metrics.recall_score(y_true, y_pred,average="weighted"))
+                uploaddic['globalprecision2'] = ("%.2f" % metrics.precision_score(y_true, y_pred, labels=labels, average="micro"))
+                uploaddic['classweightedprecision2'] = ("%.2f" % metrics.precision_score(y_true, y_pred,average="weighted"))
+                uploaddic['globalf1score2'] = ("%.2f" % metrics.f1_score(y_true, y_pred,average="micro"))
+                uploaddic['classweightedf1score2'] = ("%.2f" % metrics.f1_score(y_true, y_pred,average="weighted"))
+
+                performance_metrics = performance_metrics.transpose()
+                performance_metrics = performance_metrics.reset_index()
+                performance_metrics['index'] = performance_metrics['index'].str.title()
+                performance_metrics.rename(columns={"index":"key", 0:"value"}, inplace=True)
+
+                # print("Performance Metrics:", performance_metrics)
+                return performance_metrics
+
+
             
             path_testdata=os.path.join(BASE_DIR,'apis/TestValues/test.csv')
             path_traindata=os.path.join(BASE_DIR,'apis/TestValues/train.csv')
@@ -930,45 +1191,20 @@ class analyze(APIView):
 
             if scenarioobj:
                 for i in scenarioobj:
-                    path_testdata=i.TestFile
-                    path_module=i.ModelFile
-                    print("ScenarioSolution data:", i.SolutionName)
+                    if i.ScenarioName == request.data['SelectScenario'] and i.SolutionName == request.data['SelectSolution1']:
+                        path_testdata=i.TestFile
+                        path_module=i.ModelFile
+                        print("ScenarioSolution data:", i.SolutionName)
             print("Performance_Metrics reslt:", get_performance_metrics(path_module,path_testdata, 'Target'))
-            
-        
-        # return result(score=score, properties=properties)
+
+            if scenarioobj:
+                for i in scenarioobj:
+                    if i.ScenarioName == request.data['SelectScenario'] and i.SolutionName == request.data['SelectSolution2']:
+                        path_testdata=i.TestFile
+                        path_module=i.ModelFile
+                        print("ScenarioSolution data:", i.SolutionName)
+            print("Performance_Metrics reslt:", get_performance_metrics2(path_module,path_testdata, 'Target'))
         return Response(uploaddic)
-
-        # def get_factsheet_completeness_score(model, training_dataset, test_dataset, factsheet, methodology_config):
-        #     import collections
-        #     info = collections.namedtuple('info', 'description value')
-        #     result = collections.namedtuple('result', 'score properties')
-
-        #     score = 0
-        #     properties= {"dep" :info('Depends on','Factsheet')}
-        #     GENERAL_INPUTS = ["model_name", "purpose_description", "domain_description", "training_data_description", "model_information", "authors", "contact_information"]
-
-        #     n = len(GENERAL_INPUTS)
-        #     ctr = 0
-        #     for e in GENERAL_INPUTS:
-        #         if "general" in factsheet and e in factsheet["general"]:
-        #             ctr+=1
-        #             properties[e] = info("Factsheet Property {}".format(e.replace("_"," ")), "present")
-        #         else:
-        #             properties[e] = info("Factsheet Property {}".format(e.replace("_"," ")), "missing")
-        #     score = round(ctr/n*5)
-        #     # return result(score=score, properties=properties)
-        #     return Response("Successfully add!")
-
-class compare(APIView):
-    def get(self,request,id):
-        
-        print("compare get.... Created new")
-        # return Response(uploaddic)
-    
-    def post(self, request):
-        print("POST compare request.data request:",request.data)
-        return Response("Successfully add!")
 
 
 class dataList1(APIView):
@@ -1687,4 +1923,3 @@ def myFunc(x):
 def myFunc2(x):
     return x[-1]-x[0]
     return Response("success")
-
